@@ -4,11 +4,11 @@
 
 namespace utils {
 /**
- * @brief 初始化ValidMap（基向量有效性标记）
- * @param k 基向量数量
- * @param d_valid [输出] 有效性标记（GPU端bool）
- * @param init_valid 是否初始化为有效（true=全部有效）
- * @return cudaError_t 错误码
+ * @brief Initialize ValidMap (basis vector validity flags)
+ * @param k Number of basis vectors
+ * @param d_valid [out] Validity flags (bool on GPU)
+ * @param init_valid Whether to initialize as valid (true = all valid)
+ * @return cudaError_t Error code
  */
 cudaError_t valid_map_init(
     size_t k,
@@ -17,11 +17,11 @@ cudaError_t valid_map_init(
 );
 
 /**
- * @brief 批量更新ValidMap（标记无效基向量）
- * @param d_valid 有效性标记（GPU端bool）
- * @param invalid_indices 无效基向量索引列表（主机端）
- * @param invalid_cnt 无效基向量数量
- * @return cudaError_t 错误码
+ * @brief Batch update ValidMap (mark invalid basis vectors)
+ * @param d_valid Validity flags (bool on GPU)
+ * @param invalid_indices List of invalid basis vector indices (Host side)
+ * @param invalid_cnt Number of invalid basis vectors
+ * @return cudaError_t Error code
  */
 cudaError_t valid_map_batch_update(
     bool* d_valid,
@@ -30,11 +30,11 @@ cudaError_t valid_map_batch_update(
 );
 
 /**
- * @brief 查询有效基向量数量
- * @param d_valid 有效性标记（GPU端bool）
- * @param k 基向量总数
- * @param valid_cnt [输出] 有效基向量数量
- * @return cudaError_t 错误码
+ * @brief Query the number of valid basis vectors
+ * @param d_valid Validity flags (bool on GPU)
+ * @param k Total number of basis vectors
+ * @param valid_cnt [out] Number of valid basis vectors
+ * @return cudaError_t Error code
  */
 cudaError_t valid_map_query_count(
     const bool* d_valid,
@@ -43,14 +43,14 @@ cudaError_t valid_map_query_count(
 );
 
 /**
- * @brief 筛选有效基向量（提取有效向量至新矩阵）
- * @param d_V_in 输入基向量矩阵（M×k，GPU端float）
- * @param d_valid 有效性标记（GPU端bool）
- * @param M 基向量行数
- * @param k 基向量总数
- * @param valid_cnt 有效基向量数量
- * @param d_V_out [输出] 有效基向量矩阵（M×valid_cnt，GPU端）
- * @return cudaError_t 错误码
+ * @brief Filter valid basis vectors (extract valid vectors to a new matrix)
+ * @param d_V_in Input basis vector matrix (M x k, float on GPU)
+ * @param d_valid Validity flags (bool on GPU)
+ * @param M Number of rows in the basis vectors
+ * @param k Total number of basis vectors
+ * @param valid_cnt Number of valid basis vectors
+ * @param d_V_out [out] Matrix of valid basis vectors (M x valid_cnt, on GPU)
+ * @return cudaError_t Error code
  */
 cudaError_t valid_map_filter_basis(
     const float* d_V_in,
