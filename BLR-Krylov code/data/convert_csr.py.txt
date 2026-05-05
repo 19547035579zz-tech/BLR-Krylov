@@ -6,125 +6,93 @@ import argparse
 from typing import Optional
 
 def load_mat_sparse(mat_path: str, var_name: str = "A") -> Optional[sp.csr_matrix]:
-    """
-    从MAT文件中读取稀疏矩阵（支持full/sparse格式）：
-    - 若矩阵为full格式，自动转换为CSR；
-    - 若矩阵为sparse格式，直接提取CSR数据；
-    - 仅支持实数矩阵（float32/float64）。
-    """
     try:
-        # 读取MAT文件
         mat_dict = loadmat(mat_path)
         if var_name not in mat_dict:
-            raise ValueError(f"MAT文件中未找到变量名 '{var_name}'，请确保矩阵变量名为 '{var_name}'")
+            raise ValueError(f"Variable '{var_name}' not found in MAT file.")
         
-        # 提取矩阵
         mat = mat_dict[var_name]
-        print(f"成功读取MAT文件：{mat_path}")
-        print(f"矩阵形状：{mat.shape}，数据类型：{mat.dtype}")
+        print(f"Successfully loaded MAT file: {mat_path}")
+        print(f"Matrix shape: {mat.shape}, dtype: {mat.dtype}")
 
-        # 转换为CSR格式
         if sp.issparse(mat):
-            # 若已为稀疏格式，直接转换为CSR
             csr_mat = mat.tocsr()
         else:
-            # 若为稠密格式，转换为CSR（自动过滤零元素）
             csr_mat = sp.csr_matrix(mat)
         
-        # 转换为float32（统一数据类型）
         if csr_mat.dtype != np.float32:
             csr_mat = csr_mat.astype(np.float32)
-            print(f"矩阵数据类型已转换为 float32")
+            print("Matrix dtype converted to float32")
 
-        # 输出矩阵基本信息
         nnz = csr_mat.nnz
         size = csr_mat.shape[0] * csr_mat.shape[1]
-        print(f"CSR矩阵信息：非零元素数={nnz}，非零率={nnz/size:.2%}")
+        print(f"CSR Matrix Info: NNZ={nnz}, Density={nnz/size:.2%}")
         return csr_mat
 
     except Exception as e:
-        print(f"读取MAT文件失败：{str(e)}")
+        print(f"Failed to load MAT file: {str(e)}")
         return None
 
 def save_csr_binary(csr_mat: sp.csr_matrix, output_dir: str):
-    """
-    将CSR矩阵保存为二进制格式（与前文代码读取逻辑完全兼容）：
-    - A_val.bin: float32，非零元素值（按行序）
-    - A_row_ptr.bin: int32，行指针（indptr）
-    - A_col_idx.bin: int32，列索引（indices）
-    """
-    # 创建输出目录（若不存在）
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1. 保存非零元素值（A_val.bin）
     val_path = os.path.join(output_dir, "A_val.bin")
     with open(val_path, "wb") as f:
         f.write(csr_mat.data.tobytes())
     val_size = os.path.getsize(val_path) / 1024 / 1024
-    print(f"✅ 已保存非零元素值：{val_path}（{val_size:.2f} MB）")
+    print(f"Saved values: {val_path} ({val_size:.2f} MB)")
 
-    # 2. 保存行指针（A_row_ptr.bin）
     row_ptr_path = os.path.join(output_dir, "A_row_ptr.bin")
     with open(row_ptr_path, "wb") as f:
-        # 转换为int32（适配前文代码int类型）
         row_ptr = csr_mat.indptr.astype(np.int32)
         f.write(row_ptr.tobytes())
     row_ptr_size = os.path.getsize(row_ptr_path) / 1024 / 1024
-    print(f"✅ 已保存行指针：{row_ptr_path}（{row_ptr_size:.2f} MB）")
+    print(f"Saved row pointers: {row_ptr_path} ({row_ptr_size:.2f} MB)")
 
-    # 3. 保存列索引（A_col_idx.bin）
     col_idx_path = os.path.join(output_dir, "A_col_idx.bin")
     with open(col_idx_path, "wb") as f:
-        # 转换为int32
         col_idx = csr_mat.indices.astype(np.int32)
         f.write(col_idx.tobytes())
     col_idx_size = os.path.getsize(col_idx_path) / 1024 / 1024
-    print(f"✅ 已保存列索引：{col_idx_path}（{col_idx_size:.2f} MB）")
+    print(f"Saved column indices: {col_idx_path} ({col_idx_size:.2f} MB)")
 
 def parse_args():
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser(description="MAT文件转CSR二进制格式（适配BLR-Krylov代码）")
+    parser = argparse.ArgumentParser(description="MAT to CSR Binary Converter")
     parser.add_argument(
         "--input", "-i", 
         required=True, 
-        help="输入MAT文件路径（例：./your_matrix.mat）"
+        help="Input MAT file path"
     )
     parser.add_argument(
         "--output-dir", "-o", 
         default="./csr_output/", 
-        help="输出CSR二进制文件目录（默认：./csr_output/）"
+        help="Output CSR binary directory"
     )
     parser.add_argument(
         "--var-name", "-v", 
         default="A", 
-        help="MAT文件中稀疏矩阵的变量名（默认：A）"
+        help="Sparse matrix variable name in MAT file"
     )
     return parser.parse_args()
 
 if __name__ == "__main__":
-    # 解析命令行参数
     args = parse_args()
     print("="*60)
-    print("MAT文件转CSR二进制工具（适配BLR-Krylov）")
-    print(f"输入文件：{args.input}")
-    print(f"输出目录：{args.output_dir}")
-    print(f"矩阵变量名：{args.var_name}")
+    print("MAT to CSR Binary Converter")
+    print(f"Input file: {args.input}")
+    print(f"Output dir: {args.output_dir}")
+    print(f"Variable name: {args.var_name}")
     print("="*60)
 
-    # 1. 读取MAT文件中的稀疏矩阵
     csr_mat = load_mat_sparse(args.input, args.var_name)
     if csr_mat is None:
-        print("❌ 转换失败，退出程序")
+        print("Conversion failed. Exiting.")
         exit(1)
 
-    # 2. 保存为CSR二进制格式
     save_csr_binary(csr_mat, args.output_dir)
 
-    # 3. 输出转换完成信息
     print("="*60)
-    print("🎉 转换完成！生成文件清单：")
-    print(f"1. {os.path.join(args.output_dir, 'A_val.bin')} —— 非零元素值（float32）")
-    print(f"2. {os.path.join(args.output_dir, 'A_row_ptr.bin')} —— 行指针（int32）")
-    print(f"3. {os.path.join(args.output_dir, 'A_col_idx.bin')} —— 列索引（int32）")
-    print("\n💡 使用说明：将输出目录作为 --matrix-dir 参数传入BLR-Krylov可执行文件")
-    print(f"例：./blr_krylov --matrix-dir {args.output_dir} --k 4")
+    print("Conversion complete! Generated files:")
+    print(f"1. {os.path.join(args.output_dir, 'A_val.bin')}")
+    print(f"2. {os.path.join(args.output_dir, 'A_row_ptr.bin')}")
+    print(f"3. {os.path.join(args.output_dir, 'A_col_idx.bin')}")
