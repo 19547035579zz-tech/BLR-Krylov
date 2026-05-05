@@ -10,7 +10,6 @@
 #include <string>
 #include <getopt.h>
 
-// 错误检查宏
 #define CUDA_CHECK(err) do { \
     cudaError_t err_ = (err); \
     if (err_ != cudaSuccess) { \
@@ -19,19 +18,17 @@
     } \
 } while (0)
 
-// 命令行参数配置
 struct CmdArgs {
-    std::string matrix_dir = "../data/fem/";  // CSR矩阵目录
-    size_t k = 4;                             // 基向量数量
-    int iter_max = 100;                       // 最大迭代步数
-    float res_threshold = 1e-6;               // 残差阈值
-    int r_init = 32;                          // 初始低秩阈值
-    int super_block_size = 64;                // 超级块尺寸
-    int sub_block_size = 16;                  // 子块尺寸
-    float zfp_eps = 1e-6;                     // ZFP压缩精度
+    std::string matrix_dir = "../data/fem/";
+    size_t k = 4;
+    int iter_max = 100;
+    float res_threshold = 1e-6;
+    int r_init = 32;
+    int super_block_size = 64;
+    int sub_block_size = 16;
+    float zfp_eps = 1e-6;
 };
 
-// 解析命令行参数
 void parse_cmd_args(int argc, char** argv, CmdArgs& args) {
     const struct option long_opts[] = {
         {"matrix-dir", required_argument, nullptr, 'd'},
@@ -63,23 +60,20 @@ void parse_cmd_args(int argc, char** argv, CmdArgs& args) {
     }
 }
 
-// 生成随机初始基向量V0和右边项b
 void generate_random_vec(size_t M, float*& d_vec) {
     std::vector<float> h_vec(M);
     for (size_t i = 0; i < M; i++) {
-        h_vec[i] = static_cast<float>(rand()) / RAND_MAX;  // [0,1)随机数
+        h_vec[i] = static_cast<float>(rand()) / RAND_MAX;
     }
     cudaMalloc(&d_vec, M * sizeof(float));
     cudaMemcpy(d_vec, h_vec.data(), M * sizeof(float), cudaMemcpyHostToDevice);
 }
 
 int main(int argc, char** argv) {
-    // 1. 解析命令行参数
     CmdArgs args;
     parse_cmd_args(argc, argv, args);
     srand(static_cast<unsigned int>(time(nullptr)));
 
-    // 2. 初始化GPU环境
     int dev_id = 0;
     CUDA_CHECK(cudaSetDevice(dev_id));
     cublasHandle_t cublas_h;
@@ -87,7 +81,6 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cublasCreate(&cublas_h));
     CUDA_CHECK(cusparseCreate(&cusparse_h));
 
-    // 3. 加载CSR矩阵（主机端）
     HostCSRMatrix host_csr;
     const std::string val_path = args.matrix_dir + "/A_val.bin";
     const std::string row_ptr_path = args.matrix_dir + "/A_row_ptr.bin";
@@ -98,7 +91,6 @@ int main(int argc, char** argv) {
     }
     printf("Loaded CSR matrix: %zu×%zu, NNZ = %zu\n", host_csr.rows, host_csr.cols, host_csr.nnz);
 
-    // 4. BLR-Sparse预处理（GPU端）
     BLRMatrix blr_A;
     CUDA_CHECK(blr_sparse_preprocess(
         cusparse_h, host_csr, args.r_init,
@@ -110,36 +102,30 @@ int main(int argc, char** argv) {
            blr_A.dense_morton.size(),
            blr_A.total_blocks - blr_A.d_U_compressed.size() - blr_A.dense_morton.size());
 
-    // 5. 低秩块基向量解压缩
     std::vector<float*> d_U_decomp, d_Vt_decomp;
     CUDA_CHECK(blr_decompress_lowrank_blocks(blr_A, args.zfp_eps, d_U_decomp, d_Vt_decomp));
 
-    // 6. 生成初始基向量V0和右边项b
     float *d_V0, *d_b, *d_x;
     generate_random_vec(host_csr.rows, d_V0);
     generate_random_vec(host_csr.rows, d_b);
     cudaMalloc(&d_x, host_csr.rows * sizeof(float));
 
-    // 7. 初始化迭代参数
     IterParams iter_params = iter_init_params(
         args.res_threshold, args.r_init, 64, 16, args.iter_max, args.zfp_eps
     );
 
-    // 8. 迭代主循环
     printf("Starting iteration (k = %zu, res_thresh = %.2e)\n", args.k, args.res_threshold);
     CUDA_CHECK(iter_main_loop(
         cublas_h, cusparse_h, blr_A, d_U_decomp, d_Vt_decomp,
         d_V0, d_b, d_x, iter_params, args.k
     ));
 
-    // 9. 输出最终结果
     float final_res;
     CUDA_CHECK(iter_compute_residual(
         cublas_h, blr_A, d_U_decomp, d_Vt_decomp, d_x, d_b, final_res
     ));
     printf("Iteration finished! Final residual = %.2e\n", final_res);
 
-    // 10. 资源释放
     blr_A.free();
     blr_free_decompressed_blocks(d_U_decomp, d_Vt_decomp);
     cudaFree(d_V0);
