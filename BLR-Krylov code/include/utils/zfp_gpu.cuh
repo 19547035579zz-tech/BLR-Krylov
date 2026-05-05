@@ -5,13 +5,13 @@
 
 namespace utils {
 /**
- * @brief GPU端ZFP压缩（FP32）
- * @param d_input 输入数据（GPU端，float）
- * @param input_len 输入数据长度（元素数）
- * @param eps 压缩精度（控制误差）
- * @param d_output [输出] 压缩后数据（GPU端，float）
- * @param output_len [输出] 压缩后数据长度（字节）
- * @return cudaError_t 错误码
+ * @brief ZFP compression on GPU (FP32)
+ * @param d_input Input data (float on GPU)
+ * @param input_len Length of input data (number of elements)
+ * @param eps Compression precision (controls error tolerance)
+ * @param d_output [out] Compressed data (float on GPU)
+ * @param output_len [out] Length of compressed data (in bytes)
+ * @return cudaError_t Error code
  */
 cudaError_t zfp_gpu_compress(
     const float* d_input,
@@ -22,13 +22,13 @@ cudaError_t zfp_gpu_compress(
 );
 
 /**
- * @brief GPU端ZFP解压缩（FP32）
- * @param d_input 压缩数据（GPU端，float）
- * @param input_len 压缩数据长度（字节）
- * @param eps 压缩精度（需与压缩时一致）
- * @param output_len 解压缩后数据长度（元素数）
- * @param d_output [输出] 解压缩后数据（GPU端，float）
- * @return cudaError_t 错误码
+ * @brief ZFP decompression on GPU (FP32)
+ * @param d_input Compressed data (float on GPU)
+ * @param input_len Length of compressed data (in bytes)
+ * @param eps Compression precision (must match the precision used for compression)
+ * @param output_len Length of decompressed data (number of elements)
+ * @param d_output [out] Decompressed data (float on GPU)
+ * @return cudaError_t Error code
  */
 cudaError_t zfp_gpu_decompress(
     const float* d_input,
@@ -39,17 +39,17 @@ cudaError_t zfp_gpu_decompress(
 );
 
 /**
- * @brief 批量压缩低秩块基向量（GPU端）
- * @param d_U_list 低秩块U基向量列表（GPU端，float）
- * @param d_Vt_list 低秩块V^T基向量列表（GPU端，float）
- * @param r_list 每个低秩块的秩r
- * @param block_size 超级块尺寸（默认64）
- * @param eps 压缩精度
- * @param d_U_compressed [输出] 压缩后U列表（GPU端）
- * @param d_Vt_compressed [输出] 压缩后V^T列表（GPU端）
- * @param comp_len_U [输出] U压缩后长度（字节）
- * @param comp_len_Vt [输出] V^T压缩后长度（字节）
- * @return cudaError_t 错误码
+ * @brief Batched compression of low-rank block basis vectors (on GPU)
+ * @param d_U_list List of U basis vectors for low-rank blocks (float on GPU)
+ * @param d_Vt_list List of V^T basis vectors for low-rank blocks (float on GPU)
+ * @param r_list The rank 'r' of each low-rank block
+ * @param block_size Super-block size (default 64)
+ * @param eps Compression precision
+ * @param d_U_compressed [out] List of compressed U vectors (on GPU)
+ * @param d_Vt_compressed [out] List of compressed V^T vectors (on GPU)
+ * @param comp_len_U [out] Compressed lengths of U vectors (in bytes)
+ * @param comp_len_Vt [out] Compressed lengths of V^T vectors (in bytes)
+ * @return cudaError_t Error code
  */
 cudaError_t zfp_gpu_batch_compress_lowrank(
     const std::vector<float*>& d_U_list,
