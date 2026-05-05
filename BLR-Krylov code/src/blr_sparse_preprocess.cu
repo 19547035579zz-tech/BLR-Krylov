@@ -5,7 +5,6 @@
 #include <fstream>
 #include <iostream>
 
-// GPU端交叉近似核（计算低秩块基向量，论文4.2节）
 __global__ void cross_approximation_kernel(
     const float* d_A_block,
     int B,
@@ -16,11 +15,10 @@ __global__ void cross_approximation_kernel(
     int* d_r
 ) {
     const int tid = threadIdx.x;
-    __shared__ float shared_A[64][64];  // 64×64超级块缓存
-    __shared__ int shared_pivot[2];     // 主行/主列索引
-    __shared__ float shared_norm[64];   // 列范数
+    __shared__ float shared_A[64][64];
+    __shared__ int shared_pivot[2];
+    __shared__ float shared_norm[64];
 
-    // 步骤1：加载超级块至共享内存
     if (tid < B * B) {
         const int x = tid / B;
         const int y = tid % B;
@@ -28,7 +26,6 @@ __global__ void cross_approximation_kernel(
     }
     __syncthreads();
 
-    // 步骤2：选择主列（范数最大的列）
     if (tid < B) {
         float norm = 0.0f;
         for (int x = 0; x < B; x++) {
@@ -38,7 +35,6 @@ __global__ void cross_approximation_kernel(
     }
     __syncthreads();
 
-    // 步骤3：归约找最大范数列
     if (tid == 0) {
         float max_norm = 0.0f;
         int pivot_col = 0;
@@ -48,18 +44,15 @@ __global__ void cross_approximation_kernel(
                 pivot_col = y;
             }
         }
-        shared_pivot[0] = pivot_col;  // 主列
-        shared_pivot[1] = 0;          // 初始主行
+        shared_pivot[0] = pivot_col;
+        shared_pivot[1] = 0;
     }
     __syncthreads();
 
-    // 步骤4：构造U和V^T（简化版，实际需迭代优化）
     const int pivot_col = shared_pivot[0];
     const int r = min(static_cast<int>(sqrt(max_norm * eps) * B), r_thresh);
     if (tid < B) {
-        // U的第0列 = 主列
         d_U[tid * r] = shared_A[tid][pivot_col];
-        // V^T的第0行 = 主列
         d_Vt[pivot_col] = shared_A[tid][pivot_col];
     }
     if (tid == 0) {
@@ -67,7 +60,6 @@ __global__ void cross_approximation_kernel(
     }
 }
 
-// GPU端超级块划分核（论文4.2节Algorithm 1）
 __global__ void block_partition_kernel(
     const float* d_A_csr_val,
     const int* d_A_csr_row_ptr,
@@ -93,24 +85,20 @@ __global__ void block_partition_kernel(
     const int col_start = q * B;
     const int col_end = min((q + 1) * B, static_cast<int>(K));
 
-    // 步骤1：加载超级块数据至共享内存
     __shared__ float shared_A[64][64];
     __shared__ int shared_non_zero_cnt;
     if (threadIdx.x == 0) shared_non_zero_cnt = 0;
     __syncthreads();
 
-    // 线程分工：每个线程处理1行
     if (threadIdx.x < row_end - row_start) {
         const int global_row = row_start + threadIdx.x;
         const int row_ptr_start = d_A_csr_row_ptr[global_row];
         const int row_ptr_end = d_A_csr_row_ptr[global_row + 1];
 
-        // 初始化当前行
         for (int y = 0; y < B; y++) {
             shared_A[threadIdx.x][y] = 0.0f;
         }
 
-        // 填充非零元素
         int non_zero = 0;
         for (int j = row_ptr_start; j < row_ptr_end; j++) {
             const int global_col = d_A_csr_col_idx[j];
@@ -121,26 +109,22 @@ __global__ void block_partition_kernel(
             }
         }
 
-        // 原子计数非零元素
         atomicAdd(&shared_non_zero_cnt, non_zero);
     }
     __syncthreads();
 
-    // 步骤2：计算非零率并分类
     const float non_zero_ratio = static_cast<float>(shared_non_zero_cnt) / (B * B);
     if (threadIdx.x == 0) {
         if (non_zero_ratio < 0.01) {
-            d_block_type[block_idx] = 0;  // 零块
+            d_block_type[block_idx] = 0;
         } else if (non_zero_ratio > 0.5) {
-            d_block_type[block_idx] = 2;  // 稠密块
-            // 分配稠密块内存并拷贝数据
+            d_block_type[block_idx] = 2;
             float* d_dense = nullptr;
             cudaMalloc(&d_dense, B * B * sizeof(float));
             cudaMemcpy(d_dense, shared_A, B * B * sizeof(float), cudaMemcpySharedToDevice);
             d_dense_blocks[block_idx] = d_dense;
         } else {
-            d_block_type[block_idx] = 1;  // 低秩块
-            // 分配U/V^T内存
+            d_block_type[block_idx] = 1;
             float* d_U = nullptr;
             float* d_Vt = nullptr;
             cudaMalloc(&d_U, B * r_thresh * sizeof(float));
@@ -148,7 +132,6 @@ __global__ void block_partition_kernel(
             d_U_list[block_idx] = d_U;
             d_Vt_list[block_idx] = d_Vt;
 
-            // 交叉近似计算基向量
             int* d_r = nullptr;
             cudaMalloc(&d_r, sizeof(int));
             cross_approximation_kernel<<<1, B>>>(
@@ -169,7 +152,6 @@ cudaError_t blr_sparse_preprocess(
     float zfp_eps,
     BLRMatrix& blr_A
 ) {
-    // 步骤1：初始化BLRMatrix元数据
     const size_t M = host_csr.rows;
     const size_t K = host_csr.cols;
     const size_t block_cnt_p = (M + super_block_size - 1) / super_block_size;
@@ -180,7 +162,6 @@ cudaError_t blr_sparse_preprocess(
     blr_A.super_block_size = super_block_size;
     blr_A.sub_block_size = sub_block_size;
 
-    // 步骤2：分配元数据内存（GPU端）
     blr_A.block_type.resize(blr_A.total_blocks, 0);
     blr_A.block_p.resize(blr_A.total_blocks, 0);
     blr_A.block_q.resize(blr_A.total_blocks, 0);
@@ -188,13 +169,11 @@ cudaError_t blr_sparse_preprocess(
     blr_A.subblock_cnt.resize(blr_A.total_blocks, 0);
     blr_A.morton_size.resize(blr_A.total_blocks, 0);
 
-    // 填充块索引（p, q）
     for (size_t b = 0; b < blr_A.total_blocks; b++) {
         blr_A.block_p[b] = static_cast<int>(b / block_cnt_q);
         blr_A.block_q[b] = static_cast<int>(b % block_cnt_q);
     }
 
-    // 步骤3：拷贝CSR矩阵至GPU
     float* d_A_val;
     int* d_A_row_ptr;
     int* d_A_col_idx;
@@ -205,13 +184,12 @@ cudaError_t blr_sparse_preprocess(
     cudaMemcpy(d_A_row_ptr, host_csr.row_ptr.data(), host_csr.row_ptr.size() * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_A_col_idx, host_csr.col_idx.data(), host_csr.col_idx.size() * sizeof(int), cudaMemcpyHostToDevice);
 
-    // 步骤4：GPU并行块划分
     std::vector<float*> d_dense_blocks(blr_A.total_blocks, nullptr);
     std::vector<float*> d_U_list(blr_A.total_blocks, nullptr);
     std::vector<float*> d_Vt_list(blr_A.total_blocks, nullptr);
     std::vector<int> r_list(blr_A.total_blocks, 0);
 
-    dim3 grid(blr_A.total_blocks), block(super_block_size);  // 每个线程块处理1个超级块
+    dim3 grid(blr_A.total_blocks), block(super_block_size);
     block_partition_kernel<<<grid, block>>>(
         d_A_val, d_A_row_ptr, d_A_col_idx, M, K, super_block_size, r_thresh, zfp_eps,
         blr_A.block_type.data(), blr_A.block_p.data(), blr_A.block_q.data(),
@@ -219,7 +197,6 @@ cudaError_t blr_sparse_preprocess(
     );
     CUDA_CHECK(cudaGetLastError());
 
-    // 步骤5：稠密块Morton编码
     std::vector<float*> d_morton_blocks;
     std::vector<size_t> morton_sizes;
     std::vector<float*> dense_blocks_filtered;
@@ -233,7 +210,6 @@ cudaError_t blr_sparse_preprocess(
         d_morton_blocks, morton_sizes
     ));
 
-    // 步骤6：低秩块ZFP压缩
     std::vector<float*> U_filtered, Vt_filtered;
     std::vector<int> r_filtered;
     for (size_t b = 0; b < blr_A.total_blocks; b++) {
@@ -248,7 +224,6 @@ cudaError_t blr_sparse_preprocess(
         blr_A.d_U_compressed, blr_A.d_Vt_compressed, blr_A.comp_len_U, blr_A.comp_len_Vt
     ));
 
-    // 步骤7：整理BLRMatrix结构
     size_t dense_idx = 0, lowrank_idx = 0;
     for (size_t b = 0; b < blr_A.total_blocks; b++) {
         if (blr_A.block_type[b] == 1) {
@@ -260,7 +235,6 @@ cudaError_t blr_sparse_preprocess(
         }
     }
 
-    // 步骤8：释放临时内存
     cudaFree(d_A_val);
     cudaFree(d_A_row_ptr);
     cudaFree(d_A_col_idx);
@@ -288,13 +262,11 @@ cudaError_t blr_decompress_lowrank_blocks(
         const size_t u_len = blr_A.super_block_size * r;
         const size_t vt_len = r * blr_A.super_block_size;
 
-        // 解压缩U
         CUDA_CHECK(utils::zfp_gpu_decompress(
             blr_A.d_U_compressed[lowrank_idx], blr_A.comp_len_U[lowrank_idx],
             zfp_eps, u_len, d_U_decomp[b]
         ));
 
-        // 解压缩V^T
         CUDA_CHECK(utils::zfp_gpu_decompress(
             blr_A.d_Vt_compressed[lowrank_idx], blr_A.comp_len_Vt[lowrank_idx],
             zfp_eps, vt_len, d_Vt_decomp[b]
@@ -321,7 +293,6 @@ bool blr_load_csr_from_bin(
     const std::string& col_idx_path,
     HostCSRMatrix& host_csr
 ) {
-    // 读取非零元素值（float）
     std::ifstream val_fin(val_path, std::ios::binary);
     if (!val_fin.is_open()) return false;
     val_fin.seekg(0, std::ios::end);
@@ -331,7 +302,6 @@ bool blr_load_csr_from_bin(
     val_fin.read(reinterpret_cast<char*>(host_csr.val.data()), val_size * sizeof(float));
     val_fin.close();
 
-    // 读取行指针（int）
     std::ifstream row_ptr_fin(row_ptr_path, std::ios::binary);
     if (!row_ptr_fin.is_open()) return false;
     row_ptr_fin.seekg(0, std::ios::end);
@@ -341,7 +311,6 @@ bool blr_load_csr_from_bin(
     row_ptr_fin.read(reinterpret_cast<char*>(host_csr.row_ptr.data()), row_ptr_size * sizeof(int));
     row_ptr_fin.close();
 
-    // 读取列索引（int）
     std::ifstream col_idx_fin(col_idx_path, std::ios::binary);
     if (!col_idx_fin.is_open()) return false;
     col_idx_fin.seekg(0, std::ios::end);
@@ -351,7 +320,6 @@ bool blr_load_csr_from_bin(
     col_idx_fin.read(reinterpret_cast<char*>(host_csr.col_idx.data()), col_idx_size * sizeof(int));
     col_idx_fin.close();
 
-    // 计算矩阵维度
     host_csr.rows = host_csr.row_ptr.size() - 1;
     host_csr.nnz = host_csr.val.size();
     host_csr.cols = 0;
